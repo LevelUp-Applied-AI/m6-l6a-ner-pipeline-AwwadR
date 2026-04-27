@@ -10,6 +10,9 @@ Run: python ner_pipeline.py
 import pandas as pd
 import numpy as np
 import spacy
+import unicodedata
+import matplotlib.pyplot as plt
+import os
 from transformers import pipeline as hf_pipeline
 
 
@@ -22,8 +25,7 @@ def load_data(filepath="data/climate_articles.csv"):
     Returns:
         DataFrame with columns: id, text, source, language, category.
     """
-    # TODO: Load the CSV and return the DataFrame
-    pass
+    return pd.read_csv(filepath)
 
 
 def explore_data(df):
@@ -39,9 +41,18 @@ def explore_data(df):
           'category_counts': dict mapping category -> row count
           'text_length_stats': dict with 'mean', 'min', 'max' word counts
     """
-    # TODO: Compute shape, language/category value_counts, and word-count
-    #       statistics on df['text']
-    pass
+    word_counts = df["text"].str.split().str.len()
+
+    return {
+        "shape": df.shape,
+        "lang_counts": df["language"].value_counts().to_dict(),
+        "category_counts": df["category"].value_counts().to_dict(),
+        "text_length_stats": {
+            "mean": word_counts.mean(),
+            "min": word_counts.min(),
+            "max": word_counts.max()
+        }
+    }
 
 
 def preprocess_text(text, nlp):
@@ -57,9 +68,16 @@ def preprocess_text(text, nlp):
     Returns:
         List of cleaned, lemmatized token strings.
     """
-    # TODO: NFC-normalize the text, run it through nlp(), drop
-    #       punctuation/whitespace tokens, return lowercased lemmas
-    pass
+    normalized_text = unicodedata.normalize("NFC", text)
+    doc = nlp(normalized_text)
+
+    clean_tokens = []
+
+    for token in doc:
+        if not token.is_punct and not token.is_space:
+            clean_tokens.append(token.lemma_.lower())
+    
+    return clean_tokens
 
 
 def extract_spacy_entities(df, nlp):
@@ -73,9 +91,25 @@ def extract_spacy_entities(df, nlp):
         DataFrame with columns: text_id, entity_text, entity_label,
         start_char, end_char.
     """
-    # TODO: Filter df to English rows, process each text with nlp,
-    #       collect entities into rows, return as a DataFrame
-    pass
+    english_df = df[df["language"] == "en"]
+    entities = []
+
+    for _, row in english_df.iterrows():
+        doc = nlp(row["text"])
+
+        for ent in doc.ents:
+            entities.append({
+                "text_id": row["id"],
+                "entity_text": ent.text,
+                "entity_label": ent.label_,
+                "start_char": ent.start_char,
+                "end_char": ent.end_char
+            })
+
+    return pd.DataFrame(
+        entities,
+        columns=["text_id", "entity_text", "entity_label", "start_char", "end_char"]
+    )
 
 
 def extract_hf_entities(df, ner_pipeline):
@@ -91,10 +125,44 @@ def extract_hf_entities(df, ner_pipeline):
         DataFrame with columns: text_id, entity_text, entity_label,
         start_char, end_char.
     """
-    # TODO: Filter df to English rows, run each text through
-    #       ner_pipeline, merge ## subword tokens, strip B-/I- prefix
-    #       from labels (IOB format), return as a DataFrame
-    pass
+    english_df = df[df["language"] == "en"]
+    entities = []
+
+    for _, row in english_df.iterrows():
+        text_id = row["id"]
+        text = row["text"]
+        raw_entities = ner_pipeline(text)
+
+        current_entity = None
+
+        for item in raw_entities:
+            word = item["word"]
+            raw_label = item["entity"]
+            clean_label = raw_label.replace("B-", "").replace("I-", "")
+
+            if raw_label.startswith("B-") or current_entity is None:
+                if current_entity is not None:
+                    entities.append(current_entity)
+                
+                current_entity = {
+                    "text_id": text_id,
+                    "entity_text": word.replace("##", ""),
+                    "entity_label": clean_label,
+                    "start_char": item["start"],
+                    "end_char": item["end"]
+                }
+            
+            elif raw_label.startswith("I-") and current_entity is not None:
+                if word.startswith("##"):
+                    current_entity["entity_text"] += word.replace("##", "")
+                else:
+                    current_entity["entity_text"] += " " + word
+                current_entity["end_char"] = item["end"]
+        
+        if current_entity is not None:
+            entities.append(current_entity)
+    
+    return pd.DataFrame(entities, columns=["text_id", "entity_text", "entity_label", "start_char", "end_char"])
 
 
 def compare_ner_outputs(spacy_df, hf_df):
@@ -114,10 +182,28 @@ def compare_ner_outputs(spacy_df, hf_df):
           'spacy_only': set of (text_id, entity_text) tuples found only by spaCy
           'hf_only': set of (text_id, entity_text) tuples found only by HF
     """
-    # TODO: Count entities per label for each system, compute totals,
-    #       and derive the three overlap sets by matching on
-    #       (text_id, entity_text)
-    pass
+    spacy_counts = spacy_df["entity_label"].value_counts().to_dict()
+    hf_counts = hf_df["entity_label"].value_counts().to_dict()
+
+    total_spacy = len(spacy_df)
+    total_hf = len(hf_df)
+
+    spacy_set = set(zip(spacy_df["text_id"], spacy_df["entity_text"]))
+    hf_set = set(zip(hf_df["text_id"], hf_df["entity_text"]))
+
+    both = spacy_set & hf_set
+    spacy_only = spacy_set - hf_set
+    hf_only =  hf_set - spacy_set
+
+    return {
+        "spacy_counts": spacy_counts,
+        "hf_counts": hf_counts,
+        "total_spacy": total_spacy,
+        "total_hf": total_hf,
+        "both": both,
+        "spacy_only": spacy_only,
+        "hf_only": hf_only
+    }
 
 
 def evaluate_ner(predicted_df, gold_df):
@@ -136,10 +222,109 @@ def evaluate_ner(predicted_df, gold_df):
     Returns:
         Dictionary with keys: 'precision', 'recall', 'f1' (floats 0-1).
     """
-    # TODO: Match predicted entities to gold entities by text_id +
-    #       entity_text + entity_label, compute precision/recall/F1
-    pass
+    predicted_set = set(zip(
+        predicted_df["text_id"],
+        predicted_df["entity_text"],
+        predicted_df["entity_label"]
+    ))
 
+    gold_set = set(zip(
+        gold_df["text_id"],
+        gold_df["entity_text"],
+        gold_df["entity_label"]
+    ))
+
+    true_positive = len(predicted_set & gold_set)
+    false_positive = len(predicted_set - gold_set)
+    false_negative = len(gold_set - predicted_set)
+
+    precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0.0
+    recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+def add_category_to_entities(entities_df, articales_df):
+    """Add article category to each extracted entity using text_id."""
+    category_map = articales_df[["id", "category"]].rename(columns={"id":"text_id"})
+    
+    return entities_df.merge(category_map, on="text_id", how="left")
+
+def entity_counts_by_category(entities_df):
+    """Count entity labels separately for each category."""
+    counts = entities_df.groupby(["category", "entity_label"]).size().reset_index(name="count")
+
+    return counts
+
+def create_entity_category_pivot(counts_df):
+    """Create pivot table for visualization."""
+    pivot = counts_df.pivot_table(
+        index="category",
+        columns="entity_label",
+        values="count",
+        fill_value=0
+    )
+    return pivot
+
+def plot_entity_counts_by_category(pivot_df, output_path="outputs/tier1_entity_counts_by_category.png"):
+    """Create and save a grouped bar char for entity counts by category."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    ax = pivot_df.plot(kind="bar", figsize=(12, 6))
+    ax.set_title("Entity Counts by Category")
+    ax.set_xlabel("Category")
+    ax.set_ylabel("Entity Count")
+    ax.legend(title="Entity Label", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+    return output_path
+
+def evaluate_ner_by_category(predicted_df, gold_df, articles_df):
+    """Compute precision and recall per category using gold standard."""
+    gold_with_category = gold_df.merge(
+        articles_df[["id", "category"]].rename(columns={"id": "text_id"}),
+        on="text_id",
+        how="left"
+    )
+
+    predicted_with_category = predicted_df.merge(
+        articles_df[["id", "category"]].rename(columns={"id": "text_id"}),
+        on="text_id",
+        how="left"
+    )
+
+    results = []
+
+    for category in gold_with_category["category"].dropna().unique():
+        gold_cat = gold_with_category[gold_with_category["category"] == category]
+        pred_cat = predicted_with_category[predicted_with_category["category"] == category]
+
+        pred_set = set(zip(pred_cat["text_id"], pred_cat["entity_text"], pred_cat["entity_label"]))
+        gold_set = set(zip(gold_cat["text_id"], gold_cat["entity_text"], gold_cat["entity_label"]))
+
+        true_positives = len(pred_set & gold_set)
+        false_positives = len(pred_set - gold_set)
+        false_negatives = len(gold_set - pred_set)
+
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0.0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0.0
+
+        results.append({
+            "category": category,
+            "precision": precision,
+            "recall": recall,
+            "gold_entities": len(gold_set),
+            "predicted_entities": len(pred_set)
+        })
+    
+    return pd.DataFrame(results)
 
 if __name__ == "__main__":
     # Load spaCy and HF models once, reuse across functions
@@ -186,3 +371,26 @@ if __name__ == "__main__":
             metrics = evaluate_ner(spacy_entities, gold)
             if metrics is not None:
                 print(f"\nspaCy evaluation: {metrics}")
+        if hf_entities is not None:
+            metrics = evaluate_ner(hf_entities, gold)
+            if metrics is not None:
+                print(f"hf evaluation: {metrics}")
+
+        # Tier 1: Per-Category Ner Analysis
+        if spacy_entities is  not None:
+            spacy_entities_with_category = add_category_to_entities(spacy_entities, df)
+
+            tier1_counts = entity_counts_by_category(spacy_entities_with_category)
+            print("\nTier 1: spaCy entity counts by category")
+            print(tier1_counts)
+
+            tier1_pivot = create_entity_category_pivot(tier1_counts)
+            print("\nTier 1: Pivot table")
+            print(tier1_pivot)
+
+            char_path = plot_entity_counts_by_category(tier1_pivot)
+            print(f"\nTier 1 chart saved to: {char_path}")
+
+            tier1_eval = evaluate_ner_by_category(spacy_entities, gold, df)
+            print("\nTier 1: spaCy evaluation by category")
+            print(tier1_eval)
