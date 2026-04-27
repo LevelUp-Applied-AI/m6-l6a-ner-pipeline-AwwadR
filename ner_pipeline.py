@@ -11,6 +11,8 @@ import pandas as pd
 import numpy as np
 import spacy
 import unicodedata
+import matplotlib.pyplot as plt
+import os
 from transformers import pipeline as hf_pipeline
 
 
@@ -246,6 +248,83 @@ def evaluate_ner(predicted_df, gold_df):
         "f1": f1
     }
 
+def add_category_to_entities(entities_df, articales_df):
+    """Add article category to each extracted entity using text_id."""
+    category_map = articales_df[["id", "category"]].rename(columns={"id":"text_id"})
+    
+    return entities_df.merge(category_map, on="text_id", how="left")
+
+def entity_counts_by_category(entities_df):
+    """Count entity labels separately for each category."""
+    counts = entities_df.groupby(["category", "entity_label"]).size().reset_index(name="count")
+
+    return counts
+
+def create_entity_category_pivot(counts_df):
+    """Create pivot table for visualization."""
+    pivot = counts_df.pivot_table(
+        index="category",
+        columns="entity_label",
+        values="count",
+        fill_value=0
+    )
+    return pivot
+
+def plot_entity_counts_by_category(pivot_df, output_path="outputs/tier1_entity_counts_by_category.png"):
+    """Create and save a grouped bar char for entity counts by category."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    ax = pivot_df.plot(kind="bar", figsize=(12, 6))
+    ax.set_title("Entity Counts by Category")
+    ax.set_xlabel("Category")
+    ax.set_ylabel("Entity Count")
+    ax.legend(title="Entity Label", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+    return output_path
+
+def evaluate_ner_by_category(predicted_df, gold_df, articles_df):
+    """Compute precision and recall per category using gold standard."""
+    gold_with_category = gold_df.merge(
+        articles_df[["id", "category"]].rename(columns={"id": "text_id"}),
+        on="text_id",
+        how="left"
+    )
+
+    predicted_with_category = predicted_df.merge(
+        articles_df[["id", "category"]].rename(columns={"id": "text_id"}),
+        on="text_id",
+        how="left"
+    )
+
+    results = []
+
+    for category in gold_with_category["category"].dropna().unique():
+        gold_cat = gold_with_category[gold_with_category["category"] == category]
+        pred_cat = predicted_with_category[predicted_with_category["category"] == category]
+
+        pred_set = set(zip(pred_cat["text_id"], pred_cat["entity_text"], pred_cat["entity_label"]))
+        gold_set = set(zip(gold_cat["text_id"], gold_cat["entity_text"], gold_cat["entity_label"]))
+
+        true_positives = len(pred_set & gold_set)
+        false_positives = len(pred_set - gold_set)
+        false_negatives = len(gold_set - pred_set)
+
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0.0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0.0
+
+        results.append({
+            "category": category,
+            "precision": precision,
+            "recall": recall,
+            "gold_entities": len(gold_set),
+            "predicted_entities": len(pred_set)
+        })
+    
+    return pd.DataFrame(results)
 
 if __name__ == "__main__":
     # Load spaCy and HF models once, reuse across functions
@@ -296,3 +375,22 @@ if __name__ == "__main__":
             metrics = evaluate_ner(hf_entities, gold)
             if metrics is not None:
                 print(f"hf evaluation: {metrics}")
+
+        # Tier 1: Per-Category Ner Analysis
+        if spacy_entities is  not None:
+            spacy_entities_with_category = add_category_to_entities(spacy_entities, df)
+
+            tier1_counts = entity_counts_by_category(spacy_entities_with_category)
+            print("\nTier 1: spaCy entity counts by category")
+            print(tier1_counts)
+
+            tier1_pivot = create_entity_category_pivot(tier1_counts)
+            print("\nTier 1: Pivot table")
+            print(tier1_pivot)
+
+            char_path = plot_entity_counts_by_category(tier1_pivot)
+            print(f"\nTier 1 chart saved to: {char_path}")
+
+            tier1_eval = evaluate_ner_by_category(spacy_entities, gold, df)
+            print("\nTier 1: spaCy evaluation by category")
+            print(tier1_eval)
