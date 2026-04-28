@@ -1,0 +1,14 @@
+text_id,category,entity_text,entity_label
+1,policy,Sixth Assessment Report,REPORT
+2,policy,COP28,CLIMATE_EVENT
+5,policy,Paris Agreement,AGREEMENT
+7,policy,Paris Agreement,AGREEMENT
+10,policy,Paris Agreement,AGREEMENT
+10,policy,COP28,CLIMATE_EVENT
+48,policy,COP27,CLIMATE_EVENT
+48,policy,COP28,CLIMATE_EVENT
+71,policy,Paris Agreement,AGREEMENT
+170,policy,Global Stocktake,REPORT
+170,policy,COP28,CLIMATE_EVENT
+170,policy,Paris Agreement,AGREEMENT
+189,policy,Paris Agreement,AGREEMENT
