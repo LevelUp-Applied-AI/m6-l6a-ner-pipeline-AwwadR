@@ -1,0 +1,5 @@
+language,model,texts_processed,total_words,total_entities,entities_per_100_words,no_entity_texts,no_entity_rate_percent,entity_counts_by_type,example_entities
+en,spaCy_xx_ent_wiki_sm,20,1221,93,7.62,0,0.0,"{'ORG': 39, 'LOC': 27, 'MISC': 15, 'PER': 12}",IPCC (MISC); Sixth Assessment Report (MISC); Celsius (PER)
+ar,spaCy_xx_ent_wiki_sm,20,930,20,2.15,5,25.0,"{'PER': 9, 'MISC': 7, 'ORG': 2, 'LOC': 2}",وأكد التقرير (PER); وقّع الأردن (MISC); وأكد وزير (PER)
+en,HF_xlm_roberta_wikiann,20,1221,93,7.62,0,0.0,"{'ORG': 55, 'LOC': 28, 'PER': 10}",Antonio Guterres (PER); COP (ORG); COP (ORG)
+ar,HF_xlm_roberta_wikiann,20,930,64,6.88,0,0.0,"{'ORG': 33, 'LOC': 29, 'PER': 2}",الهيئة الحكومية الدولية المعنية بتغير المناخ (ORG); الأردن (LOC); البنك الدولي (ORG)
