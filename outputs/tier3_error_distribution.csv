@@ -1,0 +1,5 @@
+error_type,count
+spurious_entity,1164
+missing_entity,57
+boundary_error,24
+type_error,2
